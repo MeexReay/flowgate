@@ -22,5 +22,6 @@ sites:
 ## How it works
 
 This works as a proxy that redirects based on the Host header
+This makes it possible to create several http servers on one hosting with one IP address, also using ssl encryption
 
 ![explaination.png](explaination.png)
