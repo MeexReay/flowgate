@@ -165,7 +165,7 @@ impl FlowgateServer {
         }
 
         let site = site?.clone();
-        let mut site_stream = site.connect()?;
+        let mut site_stream = site.clone().connect()?;
 
         site_stream.write((addr.to_string() + "\n" + reqst).as_bytes()).ok()?;
 
@@ -195,6 +195,10 @@ impl FlowgateServer {
 
         if keep_alive {
             loop {
+                if !site.clone().support_keep_alive {
+                    site_stream.shutdown(Shutdown::Both).ok()?;
+                }
+
                 let mut reqst_data: Vec<u8> = vec![0; 4096];
 
                 stream.read(&mut reqst_data).ok()?;
@@ -218,6 +222,10 @@ impl FlowgateServer {
                     if key == "content_length" {
                         content_length = value.parse().ok()?;
                     }
+                }
+
+                if !site.clone().support_keep_alive {
+                    site_stream = site.clone().connect()?
                 }
 
                 site_stream.write((addr.to_string() + "\n" + reqst).as_bytes()).ok()?;

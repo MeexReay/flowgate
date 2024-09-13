@@ -9,6 +9,7 @@ pub struct SiteConfig {
     pub domain: String,
     pub host: String,
     pub ssl: Option<SslCert>,
+    pub support_keep_alive: bool
 }
 
 impl SiteConfig {
@@ -53,6 +54,7 @@ impl Config {
                 domain: s.get("domain")?.as_str()?.to_string(),
                 host: s.get("host")?.as_str()?.to_string(),
                 ssl: cert,
+                support_keep_alive: s.get("support_keep_alive").map(|o| o.as_bool().unwrap()).unwrap_or(false)
             };
 
             sites.push(site);
