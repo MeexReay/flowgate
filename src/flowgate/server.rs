@@ -1,10 +1,10 @@
 use std::{io::{Read, Write}, net::{Shutdown, SocketAddr, TcpListener}, sync::Arc, thread, time::Duration};
 
-use log::{debug, info};
+use log::info;
 use openssl::ssl::{NameType, SniError, SslAcceptor, SslAlert, SslMethod, SslRef};
 use threadpool::ThreadPool;
 
-use crate::Config;
+use super::Config;
 
 pub struct FlowgateServer {
     config: Arc<Config>,
@@ -191,6 +191,61 @@ impl FlowgateServer {
             info!("{} > {} https://{}{}", addr.to_string(), method, host, page);
         } else {
             info!("{} > {} http://{}{}", addr.to_string(), method, host, page);
+        }
+
+        if keep_alive {
+            loop {
+                let mut reqst_data: Vec<u8> = vec![0; 4096];
+
+                stream.read(&mut reqst_data).ok()?;
+
+                let reqst = String::from_utf8(reqst_data).ok()?;
+                let reqst = reqst.trim_matches(char::from(0));
+
+                let (head, body) = reqst.split_once("\r\n\r\n")?;
+
+                let mut head_lines = head.split("\r\n");
+
+                let status = head_lines.next()?;
+                let status: Vec<&str> = status.split(" ").collect();
+
+                let mut content_length: usize = 0;
+
+                for l in head_lines {
+                    let (key, value) = l.split_once(": ")?;
+                    let key = key.to_lowercase().replace("-", "_");
+
+                    if key == "content_length" {
+                        content_length = value.parse().ok()?;
+                    }
+                }
+
+                site_stream.write((addr.to_string() + "\n" + reqst).as_bytes()).ok()?;
+
+                if content_length != 0 && content_length > body.len() {
+                    let mut body_data: Vec<u8> = Vec::new();
+                    stream.read_to_end(&mut body_data).ok()?;
+                    site_stream.write_all(&body_data).ok()?;
+                }
+
+                loop {
+                    let mut buf: Vec<u8> = Vec::new();
+                    site_stream.read_to_end(&mut buf).ok()?;
+                    if buf.is_empty() {
+                        break;
+                    }
+                    stream.write_all(&buf).ok()?;
+                }
+
+                let method = status[0];
+                let page = status[1];
+        
+                if https {
+                    info!("{} > {} https://{}{}", addr.to_string(), method, host, page);
+                } else {
+                    info!("{} > {} http://{}{}", addr.to_string(), method, host, page);
+                }
+            }
         }
 
         site_stream.shutdown(Shutdown::Both).ok()?;

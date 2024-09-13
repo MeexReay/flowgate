@@ -6,22 +6,10 @@ pub struct SslCert {
 }
 
 fn generate_ctx(cert_file: &str, key_file: &str) -> Option<SslContext> {
-    let mut ctx = match SslContext::builder(SslMethod::tls()) {
-        Ok(i) => i,
-        Err(_) => return None,
-    };
-    match ctx.set_private_key_file(&key_file, SslFiletype::PEM) {
-        Ok(i) => i,
-        Err(_) => return None,
-    };
-    match ctx.set_certificate_file(&cert_file, SslFiletype::PEM) {
-        Ok(i) => i,
-        Err(_) => return None,
-    };
-    match ctx.check_private_key() {
-        Ok(i) => i,
-        Err(_) => return None,
-    };
+    let mut ctx = SslContext::builder(SslMethod::tls()).ok()?;
+    ctx.set_private_key_file(&key_file, SslFiletype::PEM).ok()?;
+    ctx.set_certificate_file(&cert_file, SslFiletype::PEM).ok()?;
+    ctx.check_private_key().ok()?;
     Some(ctx.build())
 }
 

@@ -1,5 +1,3 @@
-mod flowgate;
-
 use flowgate::{Config, FlowgateServer};
 
 fn main() {
