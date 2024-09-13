@@ -132,7 +132,7 @@ impl FlowgateServer {
         let reqst = String::from_utf8(reqst_data).ok()?;
         let reqst = reqst.trim_matches(char::from(0));
 
-        let (head, body) = reqst.split_once("\r\n\r\n")?;
+        let (head, _) = reqst.split_once("\r\n\r\n")?;
 
         let mut head_lines = head.split("\r\n");
 
@@ -140,7 +140,7 @@ impl FlowgateServer {
         let status: Vec<&str> = status.split(" ").collect();
 
         let mut host: &str = "honk";
-        let mut content_length: usize = 0;
+        let mut keep_alive: bool = false;
 
         for l in head_lines {
             let (key, value) = l.split_once(": ")?;
@@ -149,8 +149,8 @@ impl FlowgateServer {
             if key == "host" {
                 host = &value;
             }
-            if key == "content_length" {
-                content_length = value.parse().ok()?;
+            if key == "connection" {
+                keep_alive = value == "keep-alive";
             }
         }
 
@@ -165,12 +165,9 @@ impl FlowgateServer {
 
         site_stream.write((addr.to_string() + "\n" + reqst).as_bytes()).ok()?;
 
-        let body_len = body.len();
-        if body_len < content_length {
-            let mut body_data: Vec<u8> = vec![0; content_length - body_len];
-            stream.read_exact(&mut body_data).ok()?;
-            site_stream.write_all(&body_data).ok()?;
-        }
+        let mut body_data: Vec<u8> = Vec::new();
+        stream.read_to_end(&mut body_data).ok()?;
+        site_stream.write_all(&body_data).ok()?;
 
         loop {
             let mut buf: Vec<u8> = Vec::new();
@@ -184,13 +181,13 @@ impl FlowgateServer {
         let method = status[0];
         let page = status[1];
 
-        site_stream.shutdown(Shutdown::Both).ok()?;
-
         if https {
             info!("{} > {} https://{}{}", addr.to_string(), method, host, page);
         } else {
             info!("{} > {} http://{}{}", addr.to_string(), method, host, page);
         }
+
+        site_stream.shutdown(Shutdown::Both).ok()?;
 
         Some(())
     }
