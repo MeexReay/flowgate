@@ -1,5 +1,13 @@
-# HttpRRS
-HTTP request redirection system
+# Flowgate
+HTTP requests redirection system
+
+Features:
+- Request redirection
+- SSL/TLS support
+- Rustls support (not yet)
+- Keep-alive streams (not yet)
+
+## Config
 
 Default `conf.yml`:
 ```yml
@@ -19,8 +27,6 @@ sites:
     host: localhost:8080
 ```
 
-## How it works
-
-This works as a proxy that redirects based on the Host header
-
-![explaination.png](explaination.png)
+Rust features:
+- use-openssl
+- use-rustls ([rustls](https://github.com/rustls/rustls) - openssl alternative)
