@@ -26,13 +26,8 @@ pub struct Config {
 
 impl Config {
     pub fn parse(filename: &str) -> Option<Config> {
-        let Ok(file_content) = fs::read_to_string(filename) else {
-            return None;
-        };
-        let Ok(docs) = serde_yml::from_str::<Value>(file_content.as_str()) else {
-            return None;
-        };
-        let doc = docs.get(0)?;
+        let file_content = fs::read_to_string(filename).ok()?;
+        let doc = serde_yml::from_str::<Value>(file_content.as_str()).ok()?;
 
         let http_host = doc["http_host"].as_str()?.to_string();
         let https_host = doc["https_host"].as_str()?.to_string();
