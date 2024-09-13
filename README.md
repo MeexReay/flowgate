@@ -4,8 +4,8 @@ HTTP requests redirection system
 Features:
 - Request redirection
 - SSL/TLS support
+- Keep-alive connections
 - Rustls support (not yet)
-- Keep-alive streams (not yet)
 
 ## Config
 
