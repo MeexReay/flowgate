@@ -89,7 +89,7 @@ impl FlowgateServer {
 
         let cert = cert.build();
 
-        let pool = ThreadPool::new(10);
+        let pool = ThreadPool::new(config.threadpool_size);
 
         info!("HTTPS server runned on {}", &config.https_host);
 
@@ -100,9 +100,9 @@ impl FlowgateServer {
 
                 move || {
                     let Ok(stream) = stream else { return };
-
-                    let Ok(_) = stream.set_write_timeout(Some(Duration::from_secs(10))) else { return };
-                    let Ok(_) = stream.set_read_timeout(Some(Duration::from_secs(10))) else { return };
+                    
+                    let Ok(_) = stream.set_write_timeout(Some(config.connection_timeout)) else { return };
+                    let Ok(_) = stream.set_read_timeout(Some(config.connection_timeout)) else { return };
 
                     let Ok(addr) = stream.peer_addr() else { return };
 

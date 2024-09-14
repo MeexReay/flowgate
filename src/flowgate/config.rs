@@ -1,4 +1,4 @@
-use std::{fs, net::TcpStream, sync::Arc};
+use std::{fs, net::TcpStream, sync::Arc, time::Duration};
 
 use serde_yml::Value;
 
@@ -23,6 +23,8 @@ pub struct Config {
     pub sites: Arc<Vec<SiteConfig>>,
     pub http_host: String,
     pub https_host: String,
+    pub threadpool_size: usize,
+    pub connection_timeout: Duration
 }
 
 impl Config {
@@ -32,6 +34,9 @@ impl Config {
 
         let http_host = doc["http_host"].as_str()?.to_string();
         let https_host = doc["https_host"].as_str()?.to_string();
+
+        let threadpool_size = doc["threadpool_size"].as_u64()? as usize;
+        let connection_timeout = Duration::from_secs(doc["connection_timeout"].as_u64()?);
 
         let mut sites: Vec<SiteConfig> = Vec::new();
 
@@ -60,10 +65,14 @@ impl Config {
             sites.push(site);
         }
 
+        let sites = Arc::new(sites);
+
         Some(Config {
-            sites: Arc::new(sites),
+            sites,
             http_host,
             https_host,
+            threadpool_size,
+            connection_timeout
         })
     }
 
