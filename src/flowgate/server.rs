@@ -1,7 +1,6 @@
 use std::{io::{Read, Write}, net::{Shutdown, SocketAddr, TcpListener}, sync::Arc, thread, time::Duration};
 
 use log::info;
-use openssl::ssl::{NameType, SniError, SslAcceptor, SslAlert, SslMethod, SslRef};
 use threadpool::ThreadPool;
 
 use super::Config;
@@ -15,7 +14,7 @@ impl FlowgateServer {
         FlowgateServer { config: Arc::new(config) }
     }
 
-    pub fn start(self) {
+    pub fn start(&self) {
         thread::spawn({
             let config = Arc::clone(&self.config);
             
@@ -67,9 +66,12 @@ impl FlowgateServer {
         Some(())
     }
 
+    #[cfg(feature = "use-openssl")]
     pub fn run_https(
         config: Arc<Config>
     ) -> Option<()> {
+        use openssl::ssl::{NameType, SniError, SslAcceptor, SslAlert, SslMethod, SslRef};
+
         let listener = TcpListener::bind(&config.https_host).ok()?;
 
         let mut cert = SslAcceptor::mozilla_intermediate(SslMethod::tls()).ok()?;
@@ -105,6 +107,62 @@ impl FlowgateServer {
                     let Ok(addr) = stream.peer_addr() else { return };
 
                     let Ok(mut stream) = cert.accept(stream) else { return };
+
+                    Self::accept_stream(
+                        config,
+                        &mut stream,
+                        addr,
+                        true
+                    );
+                }
+            });
+        }
+
+        Some(())
+    }
+
+    #[cfg(feature = "use-rustls")]
+    pub fn run_https(
+        config: Arc<Config>
+    ) -> Option<()> {
+        use std::sync::Arc;
+        use rustls::{server::ResolvesServerCertUsingSni, ServerConfig};
+        use super::ssl_cert::AdoptedConnection;
+
+        let listener = TcpListener::bind(&config.https_host).ok()?;
+
+        let mut cert_resolver = ResolvesServerCertUsingSni::new();
+
+        for site in config.sites.iter() {
+            if let Some(cert) = site.ssl {
+                cert_resolver.add(&site.domain, cert.get_certified_key());
+            }
+        }
+
+        let mut tls_config = Arc::new(
+            ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(Arc::new(cert_resolver))
+        );
+
+        let pool = ThreadPool::new(10);
+
+        info!("HTTPS server runned on {}", &config.https_host);
+
+        for stream in listener.incoming() {
+            pool.execute({
+                let config = config.clone();
+                let tls_config = tls_config.clone();
+
+                move || {
+                    let Ok(mut stream) = stream else { return };
+
+                    let Ok(_) = stream.set_write_timeout(Some(Duration::from_secs(10))) else { return };
+                    let Ok(_) = stream.set_read_timeout(Some(Duration::from_secs(10))) else { return };
+
+                    let Ok(addr) = stream.peer_addr() else { return };
+
+                    let Some(mut stream) = AdoptedConnection::from_config(tls_config, stream) else { return };
 
                     Self::accept_stream(
                         config,

@@ -6,12 +6,14 @@ edition = "2021"
 [dependencies]
 openssl = { version = "0.10.66", optional = true }
 rustls = { version = "0.23.13", optional = true }
+rustls-pemfile = { version = "2.1.3", optional = true }
 serde_yml = "0.0.12"
 log = "0.4.22"
 colog = "1.3.0"
 threadpool = "1.8.1"
 
 [features]
-default = ["use-openssl"]
+# default = ["use-openssl"]
+default = ["use-rustls"]
 use-openssl = ["dep:openssl"]
-use-rustls = ["dep:rustls"]
+use-rustls = ["dep:rustls", "dep:rustls-pemfile"]
