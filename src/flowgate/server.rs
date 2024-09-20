@@ -3,7 +3,7 @@ use std::{io::{Read, Write}, net::{Shutdown, SocketAddr, TcpListener}, sync::Arc
 use log::info;
 use threadpool::ThreadPool;
 
-use super::Config;
+use super::{Closeable, Config};
 
 pub struct FlowgateServer {
     config: Arc<Config>,
@@ -179,7 +179,7 @@ impl FlowgateServer {
 
     pub fn accept_stream(
         config: Arc<Config>, 
-        stream: &mut (impl Read + Write), 
+        stream: &mut (impl Read + Write + Closeable), 
         addr: SocketAddr,
         https: bool
     ) -> Option<()> {
@@ -314,7 +314,8 @@ impl FlowgateServer {
             }
         }
 
-        site_stream.shutdown(Shutdown::Both).ok()?;
+        site_stream.close();
+        stream.close();
 
         Some(())
     }

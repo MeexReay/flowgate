@@ -108,4 +108,4 @@ impl AdoptedConnection {
     }
 }
 
-// TODO: implement Read and Write to AdoptedConnection
+// TODO: implement Read and Write and Closeable to AdoptedConnection
