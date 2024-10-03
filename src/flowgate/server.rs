@@ -251,9 +251,9 @@ impl FlowgateServer {
             info!("{} > {} http://{}{}", addr.to_string(), method, host, page);
         }
 
-        if keep_alive {
+        if keep_alive && site.enable_keep_alive {
             loop {
-                if !site.clone().support_keep_alive {
+                if !site.support_keep_alive {
                     site_stream.shutdown(Shutdown::Both).ok()?;
                 }
 
@@ -282,7 +282,7 @@ impl FlowgateServer {
                     }
                 }
 
-                if !site.clone().support_keep_alive {
+                if !site.support_keep_alive {
                     site_stream = site.clone().connect()?
                 }
 

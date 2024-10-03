@@ -1,6 +1,6 @@
 use std::{fs, net::TcpStream, sync::Arc, time::Duration};
 
-use serde_yml::Value;
+use serde_yml::{Number, Value};
 
 use super::SslCert;
 
@@ -9,6 +9,7 @@ pub struct SiteConfig {
     pub domain: String,
     pub host: String,
     pub ssl: Option<SslCert>,
+    pub enable_keep_alive: bool,
     pub support_keep_alive: bool
 }
 
@@ -35,8 +36,10 @@ impl Config {
         let http_host = doc["http_host"].as_str()?.to_string();
         let https_host = doc["https_host"].as_str()?.to_string();
 
-        let threadpool_size = doc["threadpool_size"].as_u64()? as usize;
-        let connection_timeout = Duration::from_secs(doc["connection_timeout"].as_u64()?);
+        let threadpool_size = doc.get("threadpool_size")
+            .unwrap_or(&Value::Number(Number::from(10))).as_u64()? as usize;
+        let connection_timeout = Duration::from_secs(doc.get("connection_timeout")
+            .unwrap_or(&Value::Number(Number::from(10))).as_u64()?);
 
         let mut sites: Vec<SiteConfig> = Vec::new();
 
@@ -59,7 +62,12 @@ impl Config {
                 domain: s.get("domain")?.as_str()?.to_string(),
                 host: s.get("host")?.as_str()?.to_string(),
                 ssl: cert,
-                support_keep_alive: s.get("support_keep_alive").map(|o| o.as_bool().unwrap()).unwrap_or(false)
+                enable_keep_alive: s.get("enable_keep_alive")
+                    .map(|o| o.as_bool().unwrap())
+                    .unwrap_or(true),
+                support_keep_alive: s.get("support_keep_alive")
+                    .map(|o| o.as_bool().unwrap())
+                    .unwrap_or(true)
             };
 
             sites.push(site);
