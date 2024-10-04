@@ -191,20 +191,6 @@ impl FlowgateServer {
         addr: SocketAddr,
         https: bool
     ) -> Option<()> {
-        // let mut head: Vec<u8> = Vec::new();
-
-        // for char in stream.bytes() {
-        //     if let Ok(char) = char {
-        //         if char == b'\n' && &head[head.len()-3..] == b"\r\n\r" {
-        //             head = head[..head.len()-3].to_vec();
-        //             break;
-        //         }
-        //         head.push(char);
-        //     } else {
-        //         return None;
-        //     }
-        // }
-
         let mut connected = Self::read_request(config.clone(), stream, addr, https, None)?;
 
         if connected.2 && connected.1.enable_keep_alive {
