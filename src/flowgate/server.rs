@@ -249,8 +249,10 @@ impl FlowgateServer {
                 };
             }
 
-            head.truncate(head.len().saturating_sub(3));
+            head.truncate(head.len() - 4);
         }
+
+        if head.is_empty() { return None; }
         
         let head_str = String::from_utf8(head.clone()).ok()?;
         let head_str = head_str.trim_matches(char::from(0));
@@ -283,6 +285,15 @@ impl FlowgateServer {
         } else {
             connected?
         };
+
+        let mut content_length = 0;
+
+        for (key, value) in &headers {
+            match key.to_lowercase().as_str() {
+                "content-length" => content_length = value.parse().ok()?,
+                _ => {}
+            }
+        }
         
         let mut reqbuf: Vec<u8> = Vec::new();
 
@@ -297,7 +308,7 @@ impl FlowgateServer {
                     reqbuf.append(&mut value.to_string().as_bytes().to_vec());
                     reqbuf.append(&mut b"\r\n".to_vec());
                 }
-                reqbuf.append(&mut b"\r\nX-Real-IP: ".to_vec());
+                reqbuf.append(&mut b"X-Real-IP: ".to_vec());
                 reqbuf.append(&mut addr.to_string().as_bytes().to_vec());
                 reqbuf.append(&mut b"\r\n\r\n".to_vec());
             },
@@ -309,12 +320,13 @@ impl FlowgateServer {
             },
         }
 
-        let mut buf = Vec::new();
-        while let Ok(size) = stream.read_to_end(&mut buf) {
-            if size == 0 { break }
-            reqbuf.append(&mut buf);
-        }
         connected.0.write_all(&reqbuf).ok()?;
+
+        if content_length > 0 {
+            let mut buf = Vec::with_capacity(content_length);
+            stream.read_exact(&mut buf).ok()?;
+            connected.0.write_all(&buf).ok()?;
+        }
 
         let mut buf = Vec::new();
         while let Ok(size) = connected.0.read_to_end(&mut buf) {
