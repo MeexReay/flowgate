@@ -1,9 +1,17 @@
-use std::{io::{Read, Write}, net::{Shutdown, SocketAddr, TcpListener}, sync::Arc, thread, time::Duration};
+use std::{
+    io::{Read, Write}, 
+    net::{SocketAddr, TcpListener, TcpStream}, 
+    sync::Arc, 
+    thread, 
+    time::Duration
+};
 
 use log::info;
 use threadpool::ThreadPool;
 
-use super::{Closeable, Config};
+use crate::IpForwarding;
+
+use super::{Closeable, Config, SiteConfig};
 
 pub struct FlowgateServer {
     config: Arc<Config>,
@@ -183,140 +191,140 @@ impl FlowgateServer {
         addr: SocketAddr,
         https: bool
     ) -> Option<()> {
-        let mut reqst_data: Vec<u8> = vec![0; 4096];
+        // let mut head: Vec<u8> = Vec::new();
 
-        stream.read(&mut reqst_data).ok()?;
+        // for char in stream.bytes() {
+        //     if let Ok(char) = char {
+        //         if char == b'\n' && &head[head.len()-3..] == b"\r\n\r" {
+        //             head = head[..head.len()-3].to_vec();
+        //             break;
+        //         }
+        //         head.push(char);
+        //     } else {
+        //         return None;
+        //     }
+        // }
 
-        let reqst = String::from_utf8(reqst_data).ok()?;
-        let reqst = reqst.trim_matches(char::from(0));
+        let mut connected = Self::read_request(config.clone(), stream, addr, https, None)?;
 
-        let (head, body) = reqst.split_once("\r\n\r\n")?;
-
-        let mut head_lines = head.split("\r\n");
-
-        let status = head_lines.next()?;
-        let status: Vec<&str> = status.split(" ").collect();
-
-        let mut host: &str = "honk";
-        let mut keep_alive: bool = false;
-        let mut content_length: usize = 0;
-
-        for l in head_lines {
-            let (key, value) = l.split_once(": ")?;
-            let key = key.to_lowercase().replace("-", "_");
-
-            if key == "host" {
-                host = &value;
-            }
-            if key == "connection" {
-                keep_alive = value == "keep-alive";
-            }
-            if key == "content_length" {
-                content_length = value.parse().ok()?;
-            }
-        }
-
-        let site = config.get_site(host);
-
-        if site.is_none() {
-            return None;
-        }
-
-        let site = site?.clone();
-        let mut site_stream = site.clone().connect()?;
-
-        site_stream.write((addr.to_string() + "\n" + reqst).as_bytes()).ok()?;
-
-        if content_length != 0 && content_length > body.len() {
-            let mut body_data: Vec<u8> = Vec::new();
-            stream.read_to_end(&mut body_data).ok()?;
-            site_stream.write_all(&body_data).ok()?;
-        }
-
-        loop {
-            let mut buf: Vec<u8> = Vec::new();
-            site_stream.read_to_end(&mut buf).ok()?;
-            if buf.is_empty() {
-                break;
-            }
-            stream.write_all(&buf).ok()?;
-        }
-
-        let method = status[0];
-        let page = status[1];
-
-        if https {
-            info!("{} > {} https://{}{}", addr.to_string(), method, host, page);
-        } else {
-            info!("{} > {} http://{}{}", addr.to_string(), method, host, page);
-        }
-
-        if keep_alive && site.enable_keep_alive {
+        if connected.2 && connected.1.enable_keep_alive {
             loop {
-                if !site.support_keep_alive {
-                    site_stream.shutdown(Shutdown::Both).ok()?;
+                if !connected.1.support_keep_alive {
+                    connected.0.close();
+                    connected.0 = connected.1.connect()?;
                 }
-
-                let mut reqst_data: Vec<u8> = vec![0; 4096];
-
-                stream.read(&mut reqst_data).ok()?;
-
-                let reqst = String::from_utf8(reqst_data).ok()?;
-                let reqst = reqst.trim_matches(char::from(0));
-
-                let (head, body) = reqst.split_once("\r\n\r\n")?;
-
-                let mut head_lines = head.split("\r\n");
-
-                let status = head_lines.next()?;
-                let status: Vec<&str> = status.split(" ").collect();
-
-                let mut content_length: usize = 0;
-
-                for l in head_lines {
-                    let (key, value) = l.split_once(": ")?;
-                    let key = key.to_lowercase().replace("-", "_");
-
-                    if key == "content_length" {
-                        content_length = value.parse().ok()?;
-                    }
-                }
-
-                if !site.support_keep_alive {
-                    site_stream = site.clone().connect()?
-                }
-
-                site_stream.write((addr.to_string() + "\n" + reqst).as_bytes()).ok()?;
-
-                if content_length != 0 && content_length > body.len() {
-                    let mut body_data: Vec<u8> = Vec::new();
-                    stream.read_to_end(&mut body_data).ok()?;
-                    site_stream.write_all(&body_data).ok()?;
-                }
-
-                loop {
-                    let mut buf: Vec<u8> = Vec::new();
-                    site_stream.read_to_end(&mut buf).ok()?;
-                    if buf.is_empty() {
-                        break;
-                    }
-                    stream.write_all(&buf).ok()?;
-                }
-
-                let method = status[0];
-                let page = status[1];
-        
-                if https {
-                    info!("{} > {} https://{}{}", addr.to_string(), method, host, page);
-                } else {
-                    info!("{} > {} http://{}{}", addr.to_string(), method, host, page);
-                }
+                connected = Self::read_request(config.clone(), stream, addr, https, Some(connected))?;
             }
         }
 
-        site_stream.close();
+        connected.0.close();
         stream.close();
 
         Some(())
+    }
+
+    fn read_request<'a>(
+        config: Arc<Config>, 
+        stream: &'a mut (impl Read + Write + Closeable), 
+        addr: SocketAddr,
+        https: bool,
+        connected: Option<(TcpStream, SiteConfig, bool, String)>
+    ) -> Option<(TcpStream, SiteConfig, bool, String)> {
+        let mut head = Vec::with_capacity(4096);
+
+        {
+            let mut buf = [0; 1];
+            let mut counter = 0;
+
+            while let Ok(1) = stream.read(&mut buf) {
+                let byte = buf[0];
+                head.push(byte);
+
+                counter = match (counter, byte) {
+                    (0, b'\r') => 1,
+                    (1, b'\n') => 2,
+                    (2, b'\r') => 3,
+                    (3, b'\n') => break,
+                    _ => 0,
+                };
+            }
+
+            head.truncate(head.len().saturating_sub(3));
+        }
+        
+        let head_str = String::from_utf8(head.clone()).ok()?;
+        let head_str = head_str.trim_matches(char::from(0));
+
+        let mut head_lines = head_str.split("\r\n");
+
+        let status = head_lines.next()?;
+        let status_seq: Vec<&str> = status.split(" ").collect();
+
+        let headers: Vec<(&str, &str)> = head_lines
+            .filter(|l| l.contains(": "))
+            .map(|l| l.split_once(": ").unwrap())
+            .collect();
+
+        let mut connected: (TcpStream, SiteConfig, bool, String) = if connected.is_none() {
+            let mut host = String::new();
+            let mut keep_alive = false;
+
+            for (key, value) in &headers {
+                match key.to_lowercase().as_str() {
+                    "host" => host = value.to_string(),
+                    "connection" => keep_alive = *value == "keep-alive",
+                    _ => {}
+                }
+            }
+
+            let site = config.get_site(&host)?;
+
+            (site.connect()?, site.clone(), keep_alive, host)
+        } else {
+            connected?
+        };
+        
+        let mut reqbuf: Vec<u8> = Vec::new();
+
+        match connected.1.ip_forwarding {
+            IpForwarding::Header => {
+                reqbuf.append(&mut status.to_string().as_bytes().to_vec());
+                reqbuf.append(&mut b"\r\n".to_vec());
+                for (key, value) in &headers {
+                    if *key == "X-Real-IP" { continue }
+                    reqbuf.append(&mut key.to_string().as_bytes().to_vec());
+                    reqbuf.append(&mut b": ".to_vec());
+                    reqbuf.append(&mut value.to_string().as_bytes().to_vec());
+                    reqbuf.append(&mut b"\r\n".to_vec());
+                }
+                reqbuf.append(&mut b"\r\nX-Real-IP: ".to_vec());
+                reqbuf.append(&mut addr.to_string().as_bytes().to_vec());
+                reqbuf.append(&mut b"\r\n\r\n".to_vec());
+            },
+            IpForwarding::Simple => {
+                reqbuf.append(&mut addr.to_string().as_bytes().to_vec());
+                reqbuf.push(b'\n');
+                reqbuf.append(&mut head.clone());
+                reqbuf.append(&mut b"\r\n\r\n".to_vec());
+            },
+        }
+
+        let mut buf = Vec::new();
+        while let Ok(size) = stream.read_to_end(&mut buf) {
+            if size == 0 { break }
+            reqbuf.append(&mut buf);
+        }
+        connected.0.write_all(&reqbuf).ok()?;
+
+        let mut buf = Vec::new();
+        while let Ok(size) = connected.0.read_to_end(&mut buf) {
+            if size == 0 { break }
+            stream.write_all(&buf).ok()?;
+            buf = Vec::new();
+        }
+
+        info!("{addr} > {} {}://{}{}", status_seq[0], if https { "https" } else { "http" }, connected.3, status_seq[1]);
+
+        Some(connected)
     }
 }

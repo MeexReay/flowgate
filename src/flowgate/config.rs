@@ -10,12 +10,29 @@ pub struct SiteConfig {
     pub host: String,
     pub ssl: Option<SslCert>,
     pub enable_keep_alive: bool,
-    pub support_keep_alive: bool
+    pub support_keep_alive: bool,
+    pub ip_forwarding: IpForwarding
 }
 
 impl SiteConfig {
-    pub fn connect(self) -> Option<TcpStream> {
-        TcpStream::connect(self.host).ok()
+    pub fn connect(&self) -> Option<TcpStream> {
+        TcpStream::connect(self.host.clone()).ok()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum IpForwarding {
+    Simple,
+    Header
+}
+
+impl IpForwarding {
+    pub fn from_name(name: &str) -> Option<IpForwarding> {
+        match name {
+            "simple" => Some(IpForwarding::Simple),
+            "header" => Some(IpForwarding::Header),
+            _ => None
+        }
     }
 }
 
@@ -57,7 +74,7 @@ impl Config {
                     )?,
                 );
             }
-
+            
             let site = SiteConfig {
                 domain: s.get("domain")?.as_str()?.to_string(),
                 host: s.get("host")?.as_str()?.to_string(),
@@ -67,7 +84,11 @@ impl Config {
                     .unwrap_or(true),
                 support_keep_alive: s.get("support_keep_alive")
                     .map(|o| o.as_bool().unwrap())
-                    .unwrap_or(true)
+                    .unwrap_or(true),
+                ip_forwarding: s.get("ip_forwarding")
+                    .map(|o| o.as_str()).flatten()
+                    .map(|o| IpForwarding::from_name(o)).flatten()
+                    .unwrap_or(IpForwarding::Header),
             };
 
             sites.push(site);

@@ -5,10 +5,10 @@ Features:
 - Request redirection
 - SSL/TLS support
 - Keep-alive connections
+- Sending IP in header (X-Real-IP)
 
 TODO:
 - Rustls support
-- Sending IP in header (X-Forwarded-For)
 - Remove panics
 - Creating trees of flowgate
 
@@ -25,11 +25,19 @@ connection_timeout: 10         # Read and write timeout of connections in second
 sites:
   - domain: localhost                                # Site domain
     host: localhost:8080                             # Http server host
+    ip_forwarding: simple                            # IP forwarding type (header/simple) (optional, default - header)
     enable_keep_alive: true                          # Enable keep-alive connections (optional, default - true)
     support_keep_alive: true                         # Does server supports keep-alive connections (optional, default - true)
     # ssl_cert: "/path/to/public/certificate.txt"    # Ssl public certificate file (optional)
     # ssl_key: "/path/to/private/key.txt"            # Ssl private key file (optional)
 ```
+
+### IP forwaring types
+
+- Simple:\
+  Appends `ip:port\n` to the request
+- Header:\
+  Adds header `X-Real-IP: ip:port` to the request
 
 ## How to run
 
