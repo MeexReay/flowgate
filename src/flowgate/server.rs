@@ -326,7 +326,7 @@ impl FlowgateServer {
 
         // println!("wrote client body to server");
 
-        {
+        if connected.1.support_keep_alive {
             let mut head = Vec::new();
 
             {
@@ -378,6 +378,10 @@ impl FlowgateServer {
                     if read == content_length { break }
                 }
             }
+        } else {
+            let mut buf = Vec::new();
+            connected.0.read_to_end(&mut buf).ok()?;
+            stream.write_all(&buf).ok()?;
         }
 
         // println!("wrote server response to client");
