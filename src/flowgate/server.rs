@@ -216,7 +216,7 @@ impl FlowgateServer {
         https: bool,
         connected: Option<(TcpStream, SiteConfig, bool, String)>
     ) -> Option<(TcpStream, SiteConfig, bool, String)> {
-        let mut head = Vec::with_capacity(4096);
+        let mut head = Vec::new();
 
         {
             let mut buf = [0; 1];
@@ -237,6 +237,8 @@ impl FlowgateServer {
 
             head.truncate(head.len() - 4);
         }
+
+        // println!("read client head");
 
         if head.is_empty() { return None; }
         
@@ -271,15 +273,14 @@ impl FlowgateServer {
         } else {
             connected?
         };
-
-        let mut content_length = 0;
-
-        for (key, value) in &headers {
-            match key.to_lowercase().as_str() {
-                "content-length" => content_length = value.parse().ok()?,
-                _ => {}
-            }
-        }
+        
+        let content_length = headers
+            .iter()
+            .filter(|(k, _)| k.to_lowercase() == "content-length")
+            .next()
+            .map(|o| o.1.parse().ok())
+            .flatten()
+            .unwrap_or(0usize);
         
         let mut reqbuf: Vec<u8> = Vec::new();
 
@@ -308,18 +309,78 @@ impl FlowgateServer {
 
         connected.0.write_all(&reqbuf).ok()?;
 
+        // println!("wrote client head to server");
+
         if content_length > 0 {
-            let mut buf = Vec::with_capacity(content_length);
-            stream.read_exact(&mut buf).ok()?;
-            connected.0.write_all(&buf).ok()?;
+            let mut read = 0usize;
+            let mut buf = vec![0; 4096];
+            while let Ok(size) = stream.read(&mut buf) {
+                if size == 0 { break }
+                read += size;
+                buf.truncate(size);
+                connected.0.write_all(&buf).ok()?;
+                buf = vec![0; 4096];
+                if read == content_length { break }
+            }
         }
 
-        let mut buf = Vec::new();
-        while let Ok(size) = connected.0.read_to_end(&mut buf) {
-            if size == 0 { break }
-            stream.write_all(&buf).ok()?;
-            buf = Vec::new();
+        // println!("wrote client body to server");
+
+        {
+            let mut head = Vec::new();
+
+            {
+                let mut buf = [0; 1];
+                let mut counter = 0;
+
+                while let Ok(1) = connected.0.read(&mut buf) {
+                    let byte = buf[0];
+                    head.push(byte);
+
+                    stream.write_all(&buf).ok()?;
+
+                    counter = match (counter, byte) {
+                        (0, b'\r') => 1,
+                        (1, b'\n') => 2,
+                        (2, b'\r') => 3,
+                        (3, b'\n') => break,
+                        _ => 0,
+                    };
+                }
+
+                head.truncate(head.len() - 4);
+            }
+
+            if head.is_empty() { return None; }
+            
+            let head_str = String::from_utf8(head.clone()).ok()?;
+            let head_str = head_str.trim_matches(char::from(0));
+
+            let content_length = head_str.split("\r\n")
+                .skip(1)
+                .filter(|l| l.contains(": "))
+                .map(|l| l.split_once(": ").unwrap())
+                .filter(|(k, _)| k.to_lowercase() == "content-length")
+                .next()
+                .map(|o| o.1.parse().ok())
+                .flatten()
+                .unwrap_or(0usize);
+
+            if content_length > 0 {
+                let mut read = 0usize;
+                let mut buf = vec![0; 4096];
+                while let Ok(size) = connected.0.read(&mut buf) {
+                    if size == 0 { break }
+                    read += size;
+                    buf.truncate(size);
+                    stream.write_all(&buf).ok()?;
+                    buf = vec![0; 4096];
+                    if read == content_length { break }
+                }
+            }
         }
+
+        // println!("wrote server response to client");
 
         info!("{addr} > {} {}://{}{}", status_seq[0], if https { "https" } else { "http" }, connected.3, status_seq[1]);
 
