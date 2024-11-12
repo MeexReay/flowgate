@@ -1,9 +1,5 @@
 use std::{
-    io::{Read, Write}, 
-    net::{SocketAddr, TcpListener, TcpStream}, 
-    sync::Arc, 
-    thread, 
-    time::Duration
+    io::{Read, Write}, net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpListener, TcpStream}, str::FromStr, sync::Arc, thread, time::Duration
 };
 
 use log::info;
@@ -216,6 +212,48 @@ impl FlowgateServer {
         https: bool,
         connected: Option<(TcpStream, SiteConfig, bool, String)>
     ) -> Option<(TcpStream, SiteConfig, bool, String)> {
+        let mut addr = addr;
+
+        match &config.incoming_ip_forwarding {
+            IpForwarding::Simple => {
+                let mut header = Vec::new();
+
+                {
+                    let mut buf = [0; 1];
+
+                    while let Ok(1) = stream.read(&mut buf) {
+                        let byte = buf[0];
+                        if byte == b'\n' { break }
+                        header.push(byte);
+                    }
+                }
+
+                addr = SocketAddr::from_str(&String::from_utf8(header).ok()?).ok()?;
+            },
+            IpForwarding::Modern => {
+                let mut ipver = [0; 1];
+                stream.read(&mut ipver).ok()?;
+                addr = match ipver[0] {
+                    0x01 => {
+                        let mut octets = [0; 4];
+                        stream.read(&mut octets).ok()?;
+                        let mut port = [0; 2];
+                        stream.read(&mut port).ok()?;
+                        let port = u16::from_be_bytes(port);
+                        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from(octets), port))
+                    }, 0x02 => {
+                        let mut octets = [0; 16];
+                        stream.read(&mut octets).ok()?;
+                        let mut port = [0; 2];
+                        stream.read(&mut port).ok()?;
+                        let port = u16::from_be_bytes(port);
+                        SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from(octets), port, 0, 0))
+                    }, _ => { return None },
+                };
+            },
+            _ => { }
+        }
+
         let mut head = Vec::new();
 
         {
@@ -254,6 +292,12 @@ impl FlowgateServer {
             .filter(|l| l.contains(": "))
             .map(|l| l.split_once(": ").unwrap())
             .collect();
+        
+        if let IpForwarding::Header(header) = &config.incoming_ip_forwarding {
+            if let Some(ip) = headers.iter().find(|o| o.0 == header).map(|o| o.1) {
+                addr = SocketAddr::from_str(ip).ok()?;
+            }
+        }
 
         let mut connected: (TcpStream, SiteConfig, bool, String) = if connected.is_none() {
             let mut host = String::new();
@@ -281,21 +325,22 @@ impl FlowgateServer {
             .map(|o| o.1.parse().ok())
             .flatten()
             .unwrap_or(0usize);
-        
+
         let mut reqbuf: Vec<u8> = Vec::new();
 
-        match connected.1.ip_forwarding {
-            IpForwarding::Header => {
+        match &connected.1.ip_forwarding {
+            IpForwarding::Header(header) => {
                 reqbuf.append(&mut status.to_string().as_bytes().to_vec());
                 reqbuf.append(&mut b"\r\n".to_vec());
                 for (key, value) in &headers {
-                    if *key == "X-Real-IP" { continue }
+                    if *key == header { continue }
                     reqbuf.append(&mut key.to_string().as_bytes().to_vec());
                     reqbuf.append(&mut b": ".to_vec());
                     reqbuf.append(&mut value.to_string().as_bytes().to_vec());
                     reqbuf.append(&mut b"\r\n".to_vec());
                 }
-                reqbuf.append(&mut b"X-Real-IP: ".to_vec());
+                reqbuf.append(&mut header.as_bytes().to_vec());
+                reqbuf.append(&mut b": ".to_vec());
                 reqbuf.append(&mut addr.to_string().as_bytes().to_vec());
                 reqbuf.append(&mut b"\r\n\r\n".to_vec());
             },
@@ -305,6 +350,20 @@ impl FlowgateServer {
                 reqbuf.append(&mut head.clone());
                 reqbuf.append(&mut b"\r\n\r\n".to_vec());
             },
+            IpForwarding::Modern => {
+                reqbuf.push(if addr.is_ipv4() { 0x01 } else { 0x02 });
+                match addr.ip() {
+                    IpAddr::V4(ip) => {
+                        reqbuf.append(&mut ip.octets().to_vec());
+                    }, IpAddr::V6(ip) => {
+                        reqbuf.append(&mut ip.octets().to_vec());
+                    }
+                }
+                reqbuf.append(&mut addr.port().to_be_bytes().to_vec());
+                reqbuf.append(&mut head.clone());
+                reqbuf.append(&mut b"\r\n\r\n".to_vec());
+            },
+            IpForwarding::None => { }
         }
 
         connected.0.write_all(&reqbuf).ok()?;

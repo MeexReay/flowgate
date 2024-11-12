@@ -1,6 +1,7 @@
 use std::{fs, net::TcpStream, sync::Arc, time::Duration};
 
 use serde_yml::{Number, Value};
+use wildcard_ex::is_match_simple;
 
 use super::SslCert;
 
@@ -20,18 +21,26 @@ impl SiteConfig {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum IpForwarding {
     Simple,
-    Header
+    Header(String),
+    Modern,
+    None
 }
 
 impl IpForwarding {
     pub fn from_name(name: &str) -> Option<IpForwarding> {
         match name {
+            "none" => Some(IpForwarding::None),
             "simple" => Some(IpForwarding::Simple),
-            "header" => Some(IpForwarding::Header),
-            _ => None
+            "modern" => Some(IpForwarding::Modern),
+            "header" => Some(IpForwarding::Header(String::from("X-Real-IP"))),
+            name => if name.starts_with("header:") {
+                Some(IpForwarding::Header(name[7..].to_string()))
+            } else {
+                None
+            }
         }
     }
 }
@@ -42,7 +51,8 @@ pub struct Config {
     pub http_host: String,
     pub https_host: String,
     pub threadpool_size: usize,
-    pub connection_timeout: Duration
+    pub connection_timeout: Duration,
+    pub incoming_ip_forwarding: IpForwarding
 }
 
 impl Config {
@@ -57,6 +67,10 @@ impl Config {
             .unwrap_or(&Value::Number(Number::from(10))).as_u64()? as usize;
         let connection_timeout = Duration::from_secs(doc.get("connection_timeout")
             .unwrap_or(&Value::Number(Number::from(10))).as_u64()?);
+        let incoming_ip_forwarding = doc.get("incoming_ip_forwarding")
+            .map(|o| o.as_str()).flatten()
+            .map(|o| IpForwarding::from_name(o)).flatten()
+            .unwrap_or(IpForwarding::None);
 
         let mut sites: Vec<SiteConfig> = Vec::new();
 
@@ -88,7 +102,7 @@ impl Config {
                 ip_forwarding: s.get("ip_forwarding")
                     .map(|o| o.as_str()).flatten()
                     .map(|o| IpForwarding::from_name(o)).flatten()
-                    .unwrap_or(IpForwarding::Header),
+                    .unwrap_or(IpForwarding::Header("X-Real-IP".to_string())),
             };
 
             sites.push(site);
@@ -101,13 +115,14 @@ impl Config {
             http_host,
             https_host,
             threadpool_size,
-            connection_timeout
-        })
+            connection_timeout,
+            incoming_ip_forwarding
+        }.clone())
     }
 
     pub fn get_site(&self, domain: &str) -> Option<&SiteConfig> {
         for i in self.sites.as_ref() {
-            if i.domain == domain {
+            if is_match_simple(&i.domain, domain) {
                 return Some(i);
             }
         }

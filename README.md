@@ -16,16 +16,17 @@ TODO:
 
 Default `conf.yml`:
 ```yml
-http_host: localhost:80           # Http server host
-https_host: localhost:443         # Https server host
+http_host: localhost:80     # Http server host
+https_host: localhost:443   # Https server host
 
 threadpool_size: 10            # Threadpool size (count of threads that accept requests) (optional, default - 10)
 connection_timeout: 10         # Read and write timeout of connections in seconds (optional, default - 10)
+incoming_ip_forwarding: none   # Read IP forwarding on incoming connections (optional, default - none)
 
 sites:
-  - domain: localhost                                # Site domain
+  - domain: localhost                                # Site domain (use wildcard matching)
     host: localhost:8080                             # Http server host
-    ip_forwarding: simple                            # IP forwarding type (header/simple) (optional, default - header)
+    ip_forwarding: simple                            # IP forwarding method type (optional, default - header)
     enable_keep_alive: true                          # Enable keep-alive connections (optional, default - true)
     support_keep_alive: true                         # Does server supports keep-alive connections (optional, default - true)
     # ssl_cert: "/path/to/public/certificate.txt"    # Ssl public certificate file (optional)
@@ -34,10 +35,14 @@ sites:
 
 ### IP forwaring types
 
-- Simple:\
-  Appends `ip:port\n` to the request
-- Header:\
-  Adds header `X-Real-IP: ip:port` to the request
+- None (`none`):\
+  Do nothing
+- Modern (`modern`):\
+  Appends encoded to bytes ip to the beginning of the request
+- Simple (`simple`):\
+  Appends `ip:port\n` to the beginning of the request
+- Header (`header[:HEADER_NAME]`):\
+  Adds header `HEADER_NAME: ip:port` to the request
 
 ## How to run
 
