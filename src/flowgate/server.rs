@@ -1,21 +1,19 @@
 use std::{
-    io::{Read, Write}, net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpListener, TcpStream}, str::FromStr, sync::Arc, thread, time::Duration
+    io::{Read, Write}, net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpListener, TcpStream}, str::FromStr, sync::{Arc, RwLock}, thread, time::Duration
 };
 
 use log::info;
 use threadpool::ThreadPool;
 
-use crate::IpForwarding;
-
-use super::{Closeable, Config, SiteConfig};
+use super::{closeable::Closeable, config::{Config,SiteConfig,IpForwarding}};
 
 pub struct FlowgateServer {
-    config: Arc<Config>,
+    config: Arc<RwLock<Config>>,
 }
 
 impl FlowgateServer {
-    pub fn new(config: Config) -> Self {
-        FlowgateServer { config: Arc::new(config) }
+    pub fn new(config: Arc<RwLock<Config>>) -> Self {
+        FlowgateServer { config }
     }
 
     pub fn start(&self) {
@@ -37,13 +35,13 @@ impl FlowgateServer {
     }
 
     pub fn run_http(
-        config: Arc<Config>
+        config: Arc<RwLock<Config>>
     ) -> Option<()> {
-        let listener = TcpListener::bind(&config.http_host).ok()?;
+        let listener = TcpListener::bind(&config.read().ok()?.http_host).ok()?;
 
         let pool = ThreadPool::new(10);
 
-        info!("HTTP server runned on {}", &config.http_host);
+        info!("HTTP server runned on {}", &config.read().ok()?.http_host);
 
         for stream in listener.incoming() {
             pool.execute({
@@ -72,11 +70,11 @@ impl FlowgateServer {
 
     #[cfg(feature = "use-openssl")]
     pub fn run_https(
-        config: Arc<Config>
+        config: Arc<RwLock<Config>>
     ) -> Option<()> {
         use openssl::ssl::{NameType, SniError, SslAcceptor, SslAlert, SslMethod, SslRef};
 
-        let listener = TcpListener::bind(&config.https_host).ok()?;
+        let listener = TcpListener::bind(&config.read().ok()?.https_host).ok()?;
 
         let mut cert = SslAcceptor::mozilla_intermediate(SslMethod::tls()).ok()?;
 
@@ -85,7 +83,8 @@ impl FlowgateServer {
 
                 move |ssl: &mut SslRef, _: &mut SslAlert| -> Result<(), SniError> {
                     let servname = ssl.servername(NameType::HOST_NAME).ok_or(SniError::NOACK)?;
-                    let cert = config.get_site(servname).ok_or(SniError::NOACK)?;
+                    let c = config.read().unwrap();
+                    let cert = c.get_site(servname).ok_or(SniError::NOACK)?;
                     ssl.set_ssl_context(&cert.ssl.as_ref().ok_or(SniError::NOACK)?.get_context()).ok().ok_or(SniError::NOACK)
                 }
             }
@@ -93,9 +92,9 @@ impl FlowgateServer {
 
         let cert = cert.build();
 
-        let pool = ThreadPool::new(config.threadpool_size);
+        let pool = ThreadPool::new(config.read().ok()?.threadpool_size);
 
-        info!("HTTPS server runned on {}", &config.https_host);
+        info!("HTTPS server runned on {}", &config.read().ok()?.https_host);
 
         for stream in listener.incoming() {
             pool.execute({
@@ -105,8 +104,8 @@ impl FlowgateServer {
                 move || {
                     let Ok(stream) = stream else { return };
                     
-                    let Ok(_) = stream.set_write_timeout(Some(config.connection_timeout)) else { return };
-                    let Ok(_) = stream.set_read_timeout(Some(config.connection_timeout)) else { return };
+                    let Ok(_) = stream.set_write_timeout(Some(config.read().unwrap().connection_timeout)) else { return };
+                    let Ok(_) = stream.set_read_timeout(Some(config.read().unwrap().connection_timeout)) else { return };
 
                     let Ok(addr) = stream.peer_addr() else { return };
 
@@ -127,7 +126,7 @@ impl FlowgateServer {
 
     #[cfg(feature = "use-rustls")]
     pub fn run_https(
-        config: Arc<Config>
+        config: Arc<RwLock<Config>>
     ) -> Option<()> {
         use std::sync::Arc;
         use rustls::{server::ResolvesServerCertUsingSni, ServerConfig};
@@ -182,7 +181,7 @@ impl FlowgateServer {
     }
 
     pub fn accept_stream(
-        config: Arc<Config>, 
+        config: Arc<RwLock<Config>>, 
         stream: &mut (impl Read + Write + Closeable), 
         addr: SocketAddr,
         https: bool
@@ -206,7 +205,7 @@ impl FlowgateServer {
     }
 
     fn read_request<'a>(
-        config: Arc<Config>, 
+        config: Arc<RwLock<Config>>, 
         stream: &'a mut (impl Read + Write + Closeable), 
         addr: SocketAddr,
         https: bool,
@@ -214,7 +213,7 @@ impl FlowgateServer {
     ) -> Option<(TcpStream, SiteConfig, bool, String)> {
         let mut addr = addr;
 
-        match &config.incoming_ip_forwarding {
+        match &config.read().ok()?.incoming_ip_forwarding {
             IpForwarding::Simple => {
                 let mut header = Vec::new();
 
@@ -293,7 +292,7 @@ impl FlowgateServer {
             .map(|l| l.split_once(": ").unwrap())
             .collect();
         
-        if let IpForwarding::Header(header) = &config.incoming_ip_forwarding {
+        if let IpForwarding::Header(header) = &config.read().ok()?.incoming_ip_forwarding {
             if let Some(ip) = headers.iter().find(|o| o.0 == header).map(|o| o.1) {
                 addr = SocketAddr::from_str(ip).ok()?;
             }
@@ -311,9 +310,9 @@ impl FlowgateServer {
                 }
             }
 
-            let site = config.get_site(&host)?;
+            let site = config.read().ok()?.get_site(&host)?.clone();
 
-            (site.connect()?, site.clone(), keep_alive, host)
+            (site.connect()?, site, keep_alive, host)
         } else {
             connected?
         };

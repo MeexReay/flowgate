@@ -1,9 +1,9 @@
-use std::{fs, net::TcpStream, sync::Arc, time::Duration};
+use std::{fs, net::TcpStream, time::Duration};
 
 use serde_yml::{Number, Value};
 use wildcard_ex::is_match_simple;
 
-use super::SslCert;
+use super::ssl_cert::SslCert;
 
 #[derive(Clone)]
 pub struct SiteConfig {
@@ -47,12 +47,13 @@ impl IpForwarding {
 
 #[derive(Clone)]
 pub struct Config {
-    pub sites: Arc<Vec<SiteConfig>>,
+    pub sites: Vec<SiteConfig>,
     pub http_host: String,
     pub https_host: String,
     pub threadpool_size: usize,
     pub connection_timeout: Duration,
-    pub incoming_ip_forwarding: IpForwarding
+    pub incoming_ip_forwarding: IpForwarding,
+    pub websocket_host: Option<String>
 }
 
 impl Config {
@@ -71,6 +72,7 @@ impl Config {
             .map(|o| o.as_str()).flatten()
             .map(|o| IpForwarding::from_name(o)).flatten()
             .unwrap_or(IpForwarding::None);
+        let websocket_host = doc.get("websocket_host").map(|o| o.as_str()).flatten().map(|o| o.to_string());
 
         let mut sites: Vec<SiteConfig> = Vec::new();
 
@@ -108,20 +110,19 @@ impl Config {
             sites.push(site);
         }
 
-        let sites = Arc::new(sites);
-
         Some(Config {
             sites,
             http_host,
             https_host,
             threadpool_size,
             connection_timeout,
-            incoming_ip_forwarding
+            incoming_ip_forwarding,
+            websocket_host
         }.clone())
     }
 
     pub fn get_site(&self, domain: &str) -> Option<&SiteConfig> {
-        for i in self.sites.as_ref() {
+        for i in &self.sites {
             if is_match_simple(&i.domain, domain) {
                 return Some(i);
             }
