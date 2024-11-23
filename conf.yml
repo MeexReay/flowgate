@@ -4,7 +4,6 @@ https_host: localhost:443   # Https server host
 threadpool_size: 10            # Threadpool size (count of threads that accept requests) (optional, default - 10)
 connection_timeout: 10         # Read and write timeout of connections in seconds (optional, default - 10)
 incoming_ip_forwarding: none   # Read IP forwarding on incoming connections (optional, default - none)
-
 websocket_host: localhost:999  # Websocket messaging host to edit sites (optional, default - null)
 
 sites:
