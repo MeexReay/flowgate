@@ -23,6 +23,7 @@ fn on_message(config: Arc<RwLock<Config>>, data: Value) -> Option<()> {
                 enable_keep_alive: data.get("enable_keep_alive")?.as_bool()?,
                 support_keep_alive: data.get("support_keep_alive")?.as_bool()?,
                 ip_forwarding: IpForwarding::from_name(data.get("ip_forwarding")?.as_str()?)?,
+                replace_host: data.get("replace_host").map(|o| o.as_str()).flatten().map(|o| o.to_string()),
                 ssl: None
             });
         }

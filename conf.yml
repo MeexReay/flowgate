@@ -15,3 +15,4 @@ sites:
     support_keep_alive: true                         # Does server supports keep-alive connections (optional, default - true)
     # ssl_cert: "/path/to/public/certificate.txt"    # Ssl public certificate file (optional)
     # ssl_key: "/path/to/private/key.txt"            # Ssl private key file (optional)
+    replace_host: "pansangg.github.io"               # Replace Host header in requests to server (optional)

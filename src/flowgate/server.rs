@@ -186,19 +186,19 @@ impl FlowgateServer {
         addr: SocketAddr,
         https: bool
     ) -> Option<()> {
-        let mut connected = Self::read_request(config.clone(), stream, addr, https, None)?;
+        let mut conn = Self::read_request(config.clone(), stream, addr, https, None)?;
 
-        if connected.2 && connected.1.enable_keep_alive {
+        if conn.2 && conn.1.enable_keep_alive {
             loop {
-                if !connected.1.support_keep_alive {
-                    connected.0.close();
-                    connected.0 = connected.1.connect()?;
+                if !conn.1.support_keep_alive {
+                    conn.0.close();
+                    conn.0 = conn.1.connect()?;
                 }
-                connected = Self::read_request(config.clone(), stream, addr, https, Some(connected))?;
+                conn = Self::read_request(config.clone(), stream, addr, https, Some(conn))?;
             }
         }
 
-        connected.0.close();
+        conn.0.close();
         stream.close();
 
         Some(())
@@ -209,7 +209,7 @@ impl FlowgateServer {
         stream: &'a mut (impl Read + Write + Closeable), 
         addr: SocketAddr,
         https: bool,
-        connected: Option<(TcpStream, SiteConfig, bool, String)>
+        conn: Option<(TcpStream, SiteConfig, bool, String)>
     ) -> Option<(TcpStream, SiteConfig, bool, String)> {
         let mut addr = addr;
 
@@ -275,8 +275,6 @@ impl FlowgateServer {
             head.truncate(head.len() - 4);
         }
 
-        // println!("read client head");
-
         if head.is_empty() { return None; }
         
         let head_str = String::from_utf8(head.clone()).ok()?;
@@ -298,7 +296,7 @@ impl FlowgateServer {
             }
         }
 
-        let mut connected: (TcpStream, SiteConfig, bool, String) = if connected.is_none() {
+        let mut conn: (TcpStream, SiteConfig, bool, String) = if conn.is_none() {
             let mut host = String::new();
             let mut keep_alive = false;
 
@@ -314,7 +312,7 @@ impl FlowgateServer {
 
             (site.connect()?, site, keep_alive, host)
         } else {
-            connected?
+            conn?
         };
         
         let content_length = headers
@@ -327,7 +325,31 @@ impl FlowgateServer {
 
         let mut reqbuf: Vec<u8> = Vec::new();
 
-        match &connected.1.ip_forwarding {
+        if let Some(replace_host) = conn.1.replace_host.clone() {
+            let mut new_head = Vec::new();
+            let mut is_status = true;
+
+            for line in head_str.split("\r\n") {
+                if is_status {
+                    new_head.append(&mut line.as_bytes().to_vec());
+                    is_status = false;
+                } else {
+                    new_head.append(&mut b"\r\n".to_vec());
+                    let (key, _) = line.split_once(": ")?;
+                    if key.to_lowercase() == "host" {
+                        new_head.append(&mut key.as_bytes().to_vec());
+                        new_head.append(&mut b": ".to_vec());
+                        new_head.append(&mut replace_host.as_bytes().to_vec());
+                    } else {
+                        new_head.append(&mut line.as_bytes().to_vec());
+                    }
+                }
+            }
+
+            head = new_head;
+        }
+
+        match &conn.1.ip_forwarding {
             IpForwarding::Header(header) => {
                 reqbuf.append(&mut status.to_string().as_bytes().to_vec());
                 reqbuf.append(&mut b"\r\n".to_vec());
@@ -362,12 +384,13 @@ impl FlowgateServer {
                 reqbuf.append(&mut head.clone());
                 reqbuf.append(&mut b"\r\n\r\n".to_vec());
             },
-            IpForwarding::None => { }
+            IpForwarding::None => {
+                reqbuf.append(&mut head.clone());
+                reqbuf.append(&mut b"\r\n\r\n".to_vec());
+            }
         }
 
-        connected.0.write_all(&reqbuf).ok()?;
-
-        // println!("wrote client head to server");
+        conn.0.write_all(&reqbuf).ok()?;
 
         if content_length > 0 {
             let mut read = 0usize;
@@ -376,22 +399,20 @@ impl FlowgateServer {
                 if size == 0 { break }
                 read += size;
                 buf.truncate(size);
-                connected.0.write_all(&buf).ok()?;
+                conn.0.write_all(&buf).ok()?;
                 buf = vec![0; 4096];
                 if read == content_length { break }
             }
         }
 
-        // println!("wrote client body to server");
-
-        if connected.1.support_keep_alive {
+        if conn.1.support_keep_alive {
             let mut head = Vec::new();
 
             {
                 let mut buf = [0; 1];
                 let mut counter = 0;
 
-                while let Ok(1) = connected.0.read(&mut buf) {
+                while let Ok(1) = conn.0.read(&mut buf) {
                     let byte = buf[0];
                     head.push(byte);
 
@@ -427,7 +448,7 @@ impl FlowgateServer {
             if content_length > 0 {
                 let mut read = 0usize;
                 let mut buf = vec![0; 4096];
-                while let Ok(size) = connected.0.read(&mut buf) {
+                while let Ok(size) = conn.0.read(&mut buf) {
                     if size == 0 { break }
                     read += size;
                     buf.truncate(size);
@@ -438,14 +459,12 @@ impl FlowgateServer {
             }
         } else {
             let mut buf = Vec::new();
-            connected.0.read_to_end(&mut buf).ok()?;
+            conn.0.read_to_end(&mut buf).ok()?;
             stream.write_all(&buf).ok()?;
         }
 
-        // println!("wrote server response to client");
+        info!("{addr} > {} {}://{}{}", status_seq[0], if https { "https" } else { "http" }, conn.3, status_seq[1]);
 
-        info!("{addr} > {} {}://{}{}", status_seq[0], if https { "https" } else { "http" }, connected.3, status_seq[1]);
-
-        Some(connected)
+        Some(conn)
     }
 }

@@ -12,28 +12,7 @@ TODO:
 - Remove panics
 - Creating trees of flowgate
 
-## Config
-
-Default `conf.yml`:
-```yml
-http_host: localhost:80     # Http server host
-https_host: localhost:443   # Https server host
-
-threadpool_size: 10            # Threadpool size (count of threads that accept requests) (optional, default - 10)
-connection_timeout: 10         # Read and write timeout of connections in seconds (optional, default - 10)
-incoming_ip_forwarding: none   # Read IP forwarding on incoming connections (optional, default - none)
-
-sites:
-  - domain: localhost                                # Site domain (use wildcard matching)
-    host: localhost:8080                             # Http server host
-    ip_forwarding: simple                            # IP forwarding method type (optional, default - header)
-    enable_keep_alive: true                          # Enable keep-alive connections (optional, default - true)
-    support_keep_alive: true                         # Does server supports keep-alive connections (optional, default - true)
-    # ssl_cert: "/path/to/public/certificate.txt"    # Ssl public certificate file (optional)
-    # ssl_key: "/path/to/private/key.txt"            # Ssl private key file (optional)
-```
-
-### IP forwaring types
+## IP forwarding types
 
 - None (`none`):\
   Do nothing

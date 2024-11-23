@@ -12,7 +12,8 @@ pub struct SiteConfig {
     pub ssl: Option<SslCert>,
     pub enable_keep_alive: bool,
     pub support_keep_alive: bool,
-    pub ip_forwarding: IpForwarding
+    pub ip_forwarding: IpForwarding,
+    pub replace_host: Option<String>
 }
 
 impl SiteConfig {
@@ -105,6 +106,8 @@ impl Config {
                     .map(|o| o.as_str()).flatten()
                     .map(|o| IpForwarding::from_name(o)).flatten()
                     .unwrap_or(IpForwarding::Header("X-Real-IP".to_string())),
+                replace_host: s.get("replace_host")
+                    .map(|o| o.as_str()).flatten().map(|o| o.to_string()),
             };
 
             sites.push(site);
