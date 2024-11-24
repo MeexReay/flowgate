@@ -425,7 +425,35 @@ impl FlowgateServer {
                 if read >= content_length { break }
             }
         } else if is_chunked {
-            // write chunked logic
+            loop {
+                let mut length = Vec::new();
+                {
+                    let mut buf = [0; 1];
+                    let mut counter = 0;
+
+                    while let Ok(1) = stream.read(&mut buf) {
+                        let byte = buf[0];
+                        length.push(byte);
+
+                        counter = match (counter, byte) {
+                            (0, b'\r') => 1,
+                            (1, b'\n') => break,
+                            _ => 0,
+                        };
+                        conn.stream.write_all(&buf).ok()?;
+                    }
+
+                    length.truncate(length.len() - 2);
+                }
+                let length = usize::from_str_radix(String::from_utf8(length).ok()?.as_str(), 16).ok()?;
+                let mut data = vec![0; length+2];
+                stream.read_exact(&mut data).ok()?;
+                conn.stream.write_all(&data).ok()?;
+                data.truncate(length);
+                if length == 0 {
+                    break;
+                }
+            }
         }
 
         if conn.config.support_keep_alive {
